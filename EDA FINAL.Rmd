@@ -1,0 +1,242 @@
+---
+title: "EDA FINAL"
+author: "Claranne Fechter"
+date: "2025-02-16"
+output: html_document
+---
+
+# Introduction
+
+This project is working with the company Home Credit. Their goal as a company is to offer financial services to those who are unbanked and are not the typical customer to get approved for loans. They want to expand access to financial services to this population of customers and determine who will not default. 
+
+The focus of this project is on predictive analytics to see default risk. A supervised approach will be used to get the model to classify customers. The classification model will put customers into groups where either they will default or they will not default. The target variable in the data is TARGET. It is a binary variable where 0 is doesn’t default and 1 is does default.
+
+The purpose of this notebook is to examine the data Home Credit has provided for us and predict customers default risk. We are going to look at the TARGET variable and find out what other predictors influence that TARGET variable the most.
+
+## Questions
+
+What is the distribution of the TARGET variable and is the data imbalanced?
+How should we deal with missing values?
+What are columns have the most statistical impact on the TARGET variable?
+Does income level impact default risk for these customer?
+
+# Description of Data
+
+```{r, warning=FALSE}
+# Import packages
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(skimr)
+library(janitor)
+```
+
+```{r}
+# Import data
+DFtrain <- read.csv("application_train.csv", stringsAsFactors = TRUE)
+
+# First 6 rows of the data
+head(DFtrain)
+```
+
+```{r}
+# Get information about data
+skim(DFtrain)
+```
+
+There are 307511 rows and 122 columns within the train data. Of these columns, 106 are numeric variables and 16 are character. This dataset is quite large and there are many columns and rows. We will have to dive deeper to see which predictors could be important. This code gives us detailed information of all of the columns. We can also start to see the missing data. 
+
+## Missing Data
+
+```{r}
+# Find out which columns have missing values
+count_missings <- function(x) sum(is.na(x))
+
+DFtrain |> 
+  summarize_all(count_missings) # Handy summarize_all function
+```
+
+Some columns seem to have a limited number of missings and other have an enormous amount. Let's focus on the large amounts first.
+
+```{r}
+# Sort missings by lowest completion rate 
+skim(DFtrain) |>
+    filter(complete_rate < 1) |>
+  select(skim_variable, complete_rate) |>
+  arrange(complete_rate)
+```
+
+This is a list of all the columns that have NA's within them. We can see that most of the variables on this list is information about where the client lives. We might be able to drop some of these columns since there is an immense amount of missing but we will need to inspect further. We also could fill in the NA's in the columns that are not missing a lot of information.
+
+# Clean data
+Clean data to deal with missing values and outliers.
+
+```{r}
+cleantrain <- DFtrain |>
+  mutate(
+    # Replace with median
+    AMT_ANNUITY = replace_na(AMT_ANNUITY, replace = median(AMT_ANNUITY, na.rm = TRUE)),
+    AMT_GOODS_PRICE = replace_na(AMT_GOODS_PRICE, replace = median(AMT_GOODS_PRICE, na.rm = TRUE)),
+    EXT_SOURCE_1 = replace_na(EXT_SOURCE_1, replace = median(EXT_SOURCE_1, na.rm = TRUE)),
+    EXT_SOURCE_2 = replace_na(EXT_SOURCE_2, replace = median(EXT_SOURCE_2, na.rm = TRUE)),
+    EXT_SOURCE_3 = replace_na(EXT_SOURCE_3, replace = median(EXT_SOURCE_3, na.rm = TRUE)),
+    OBS_30_CNT_SOCIAL_CIRCLE = replace_na(OBS_30_CNT_SOCIAL_CIRCLE, replace = median(OBS_30_CNT_SOCIAL_CIRCLE, na.rm = TRUE)), 
+    OBS_60_CNT_SOCIAL_CIRCLE = replace_na(OBS_60_CNT_SOCIAL_CIRCLE, replace = median(OBS_60_CNT_SOCIAL_CIRCLE, na.rm = TRUE)),
+    DEF_30_CNT_SOCIAL_CIRCLE = replace_na(DEF_30_CNT_SOCIAL_CIRCLE, replace = median(DEF_30_CNT_SOCIAL_CIRCLE, na.rm = TRUE)),
+    DEF_60_CNT_SOCIAL_CIRCLE = replace_na(DEF_60_CNT_SOCIAL_CIRCLE, replace = median(DEF_60_CNT_SOCIAL_CIRCLE, na.rm = TRUE)),
+    CNT_FAM_MEMBERS = replace_na(CNT_FAM_MEMBERS, replace = median(CNT_FAM_MEMBERS, na.rm = TRUE)),
+    DAYS_LAST_PHONE_CHANGE = replace_na(DAYS_LAST_PHONE_CHANGE, replace = median(DAYS_LAST_PHONE_CHANGE, na.rm = TRUE)),    
+    AMT_REQ_CREDIT_BUREAU_HOUR = replace_na(AMT_REQ_CREDIT_BUREAU_HOUR, replace = median(AMT_REQ_CREDIT_BUREAU_HOUR, na.rm = TRUE)),
+    AMT_REQ_CREDIT_BUREAU_DAY = replace_na(AMT_REQ_CREDIT_BUREAU_DAY, replace = median(AMT_REQ_CREDIT_BUREAU_DAY, na.rm = TRUE)),
+    AMT_REQ_CREDIT_BUREAU_WEEK = replace_na(AMT_REQ_CREDIT_BUREAU_WEEK, replace = median(AMT_REQ_CREDIT_BUREAU_WEEK, na.rm = TRUE)),
+    AMT_REQ_CREDIT_BUREAU_MON = replace_na(AMT_REQ_CREDIT_BUREAU_MON, replace = median(AMT_REQ_CREDIT_BUREAU_MON, na.rm = TRUE)),
+    AMT_REQ_CREDIT_BUREAU_QRT = replace_na(AMT_REQ_CREDIT_BUREAU_QRT, replace = median(AMT_REQ_CREDIT_BUREAU_QRT, na.rm = TRUE)),
+    AMT_REQ_CREDIT_BUREAU_YEAR = replace_na(AMT_REQ_CREDIT_BUREAU_YEAR, replace = median(AMT_REQ_CREDIT_BUREAU_YEAR, na.rm = TRUE)),
+    # Replace with mode
+    NAME_TYPE_SUITE = replace_na(NAME_TYPE_SUITE, replace = mode(NAME_TYPE_SUITE)),
+    # Replace with name
+    WALLSMATERIAL_MODE = replace_na(WALLSMATERIAL_MODE, replace = "Unknown"),
+    OCCUPATION_TYPE = replace_na(OCCUPATION_TYPE, replace = "Other"),
+    HOUSETYPE_MODE = replace_na(HOUSETYPE_MODE, replace = "Other"),
+  )
+```
+
+I choose to replace most of the numeric columns with the median because I believe it gives a better overall view of the data rather than the mean. I also replaces some of the character NA's with a new group because in these situations Other or Unknown fits the other values in the data and is not present. A step to do in the future would be to remove some of the columns that deal with the clients housing situation. Like I previously stated, many of those columns only have about a 30% completion rate which is very low and we could potentially remove them, especially if we find that they are not significant and make our data more complex. For now, I will fill the rest of the missing values with again the median or most common categorical value. 
+
+```{r}
+# Handle the rest of the missing values
+# Identify numeric and categorical columns
+numeric_cols <- names(cleantrain)[sapply(cleantrain, is.numeric)]
+categorical_cols <- names(cleantrain)[sapply(cleantrain, is.factor) | sapply(cleantrain, is.character)]
+
+# Fill missing values in numeric columns with median
+for (col in numeric_cols) {
+  cleantrain[[col]][is.na(cleantrain[[col]])] <- median(cleantrain[[col]], na.rm = TRUE)
+}
+
+# Fill missing values in categorical columns with the most frequent value (mode)
+for (col in categorical_cols) {
+  most_frequent <- names(sort(table(cleantrain[[col]]), decreasing = TRUE))[1]  # Get most common category
+  cleantrain[[col]][is.na(cleantrain[[col]])] <- most_frequent
+}
+```
+
+```{r}
+skim(cleantrain) 
+```
+
+# Visualizations and Tables
+
+Lets look into the TARGET variable and get a majority class.
+
+```{r}
+table(cleantrain$TARGET) # Class distribution
+prop.table(table(cleantrain$TARGET)) # proportion of each
+```
+
+There is a large imbalance within the TARGET variable as very few people actually default according to the TARGET variable.
+The majority class predictor is No Deafult (0) and it is expected to happen about 92% of the time.
+
+```{r}
+# Visual to see imbalance of TARGET
+ggplot(cleantrain, aes(factor(TARGET))) +
+  geom_bar() +
+  labs(title = "Target Variable Distribution", x = "Target", y = "Count") +
+  theme_minimal()
+```
+
+
+Visualizations between TARGET and predictors.
+ 
+```{r}
+# Relationship between age and the TARGET variable
+ggplot(cleantrain, aes(x = factor(TARGET), y = DAYS_BIRTH)) + 
+  geom_boxplot() + 
+  labs(x = "Target", y = "Age (in days)", title = "Boxplot of Age by Target")
+
+```
+It appears from this boxplot that younger clients default slightly more. 
+
+```{r}
+# Ext sources relationship with default risk.
+# For EXT_SOURCE_1
+ggplot(cleantrain, aes(factor(TARGET), EXT_SOURCE_1)) + 
+  geom_boxplot() + 
+  labs(title = "EXT_SOURCE_1 by Target", x = "Target", y = "EXT_SOURCE_1")
+
+# For EXT_SOURCE_2
+ggplot(cleantrain, aes(factor(TARGET), EXT_SOURCE_2)) + 
+  geom_boxplot() + 
+  labs(title = "EXT_SOURCE_2 by Target", x = "Target", y = "EXT_SOURCE_2")
+
+# For EXT_SOURCE_3
+ggplot(cleantrain, aes(factor(TARGET), EXT_SOURCE_3)) + 
+  geom_boxplot() + 
+  labs(title = "EXT_SOURCE_3 by Target", x = "Target", y = "EXT_SOURCE_3")
+```
+With all 3 sources, it looks like lower scores are more likely to default. 
+
+```{r}
+# Car ownership and default
+ggplot(cleantrain, aes(x = FLAG_OWN_CAR, fill = factor(TARGET))) + 
+  geom_bar(position = "dodge") +  
+  labs(title = "Count of Defaults by Car Ownership", x = "Own Car", y = "Count") +
+  theme_minimal()
+```
+
+We can see the number of defaulters is larger in clients that don't own a car.
+
+```{r}
+# Contract type and default
+ggplot(cleantrain, aes(x = NAME_CONTRACT_TYPE, fill = factor(TARGET))) + 
+  geom_bar(position = "dodge") +
+  labs(title = "Count of Defaults by Contract Type", x = "Contract Type", y = "Count") +
+  theme_minimal()
+```
+
+There are a limited number of customers who get revolving loan so it seems like most are capable of repayment.
+
+# Logistic Regression Models 
+
+```{r}
+# Base model with limited predictors to see significance
+glm_model <- glm(TARGET ~ EXT_SOURCE_1 + EXT_SOURCE_2 + EXT_SOURCE_3 + CODE_GENDER + DAYS_EMPLOYED + HOUSETYPE_MODE + FLAG_OWN_CAR + FLAG_OWN_REALTY, data = cleantrain, family = binomial())
+summary(glm_model)
+```
+
+For this first base model, I choose a limited number of predictors to see their significance. All External Sources seem to be significant. The same goes with days employed, owning a car, and owning realty. 
+
+```{r}
+# Second model with a few more added predictors
+glm_model2 <- glm(TARGET ~ EXT_SOURCE_1 + EXT_SOURCE_2 + EXT_SOURCE_3 + AMT_INCOME_TOTAL + AMT_ANNUITY + AMT_GOODS_PRICE + FLAG_OWN_CAR + DAYS_BIRTH + OCCUPATION_TYPE + NAME_CONTRACT_TYPE, data = cleantrain, family = binomial())
+summary(glm_model2)
+```
+
+I am surprised to see that income total is not as significant as you would might expect. Amount annuity and amount goods price are both significant which can help us in the future. 
+
+**Calculate in-sample accuracy with a decision threshold of .5.**
+
+```{r}
+# Calculate accuracy as the proportion of correct predictions
+
+(ifelse(predict(glm_model2, type = "response") > .5, "1", "0") == cleantrain$TARGET) |> 
+  mean() 
+```
+
+```{r}
+# Calculate accuracy for a majority class model
+cleantrain |> 
+  summarize(TARGET = mean(TARGET == 0 )) 
+
+```
+For the second logisitic regression model I made, we can see that my model does not do better than the accuracy of the majority class model. I will have to look into using different columns and try to get a better accuracy in the future. 
+
+
+# Results
+
+This data was very interesting to work with. We found that there is a very large imbalance within the TARGET variable as many clients do not default. After looking at the visualizations, we can see that the EXT_SOURCES show those with lower scores have a higher risk of default. It does not appear that owning a car increases the chances of not defaulting. The age column does indicate that younger clients might have a higher default risk.
+
+Although my logistic model did not improve accuracy as I had hoped, I was still able to gain some information. I was able to see what variables statistically, impact TARGET the most. I was surprised to see NAME_CONTRACT_TYPE as statistically significant because with the bar chart I made it would be hard to indicate that it was meaningful. It was also interesting to see that AMT_INCOME_TOTAL does not seem to impact TARGET that strongly which is opposite to what I would have assumed. 
+
+Moving forward, I think it would be important to remove columns and rows that have little information within them. I also am looking to balance the dataset and maybe change some of the columns to bin them. I would like to remove outliers to improve the clean data. I also will create more models that will improve the accuracy and narrow down which predictors I want to stick with to give Home Credit the best chance at predicting Default. I am looking forward to continue working with this data and join a group to compare ideas. 
+
