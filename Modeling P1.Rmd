@@ -1,0 +1,255 @@
+---
+title: 'Modeling: Start'
+author: "Claranne Fechter"
+date: "2/26/2025"
+output: 
+  html_document: 
+    toc: true
+---
+
+# Introduction
+
+This project is working with the company Home Credit. Their goal as a company is to offer financial services to those who are unbanked and are not the typical customer to get approved for loans. They want to expand access to financial services to this population of customers and determine who will not default. 
+
+The focus of this project is on predictive analytics to see default risk. A supervised approach will be used to get the model to classify customers. The classification model will put customers into groups where either they will default or they will not default. The target variable in the data is TARGET. It is a binary variable where 0 is doesn’t default and 1 is does default.
+
+The purpose of this notebook is to model the data and gain more understanding of the TARGET variable and which variables can help improve the model. 
+
+# Description of the Data
+First, regarding the train dataset, the target variable is actually called TARGET. It is equal to 1 if it is a client with payment difficulties such as late payments on a loan and equal to 0 otherwise. One variable is an ID variable, but the remaining 120 are potential explanatory variables of the TARGET. These variables illustrate a variety of different aspects of the client's life and specifics about loans. Some examples of variables are gender, income of the client, loan annuity, the education level of the client, and the family status of the client. There are many other variable including three important ones that give external credit scores for the client. There are numerous variables about the building where the client lives such as information about the apartments, floors, land area, and entrances. For each one of these building variables, the dataset includes the average, mode, and median for them as separate columns. There are also 20 flag document variables which say if the client provided a certain document or not. There are a few other datasets. We only focused on one other one which was the bureau data. The bureau dataset holds all client's previous credits from other financial institutions if they have a loan in the sample. The variables in this dataset include the status of the Credit Bureau reported credits, the number of days past due, and the current credit amount. 
+
+
+# Data Preparation
+
+```{r, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(ggplot2)
+library(skimr)
+library(janitor)
+library(pROC)
+library(e1071)
+library(caret)
+
+train <- read.csv("application_train.csv")
+test <- read.csv("application_test.csv")
+```
+
+## Clean Train
+
+```{r clean train, , echo=TRUE, results='hide'}
+# Make day variables positvie
+train_clean <- train |>
+  mutate(across(c(DAYS_BIRTH, DAYS_EMPLOYED, DAYS_REGISTRATION, DAYS_ID_PUBLISH, DAYS_LAST_PHONE_CHANGE), abs))
+
+# Remove columns that have lots of missings or not relevant 
+
+train_clean <- train_clean %>% 
+  select(-YEARS_BUILD_AVG, -OWN_CAR_AGE, -COMMONAREA_AVG, -FLOORSMIN_AVG, -LIVINGAPARTMENTS_AVG, 
+         -NONLIVINGAPARTMENTS_AVG, -YEARS_BUILD_MODE, -COMMONAREA_MODE, -FLOORSMIN_MODE, -LIVINGAPARTMENTS_MODE, -NONLIVINGAPARTMENTS_MODE, -YEARS_BUILD_MEDI, -COMMONAREA_MEDI, -FLOORSMIN_MEDI, -NONLIVINGAPARTMENTS_MEDI, -LIVINGAPARTMENTS_MEDI, -FLAG_MOBIL, -FLAG_DOCUMENT_2, -FLAG_DOCUMENT_4, -FLAG_DOCUMENT_7, -FLAG_DOCUMENT_10, -FLAG_DOCUMENT_12, -FLAG_DOCUMENT_17, -FLAG_DOCUMENT_21)
+
+# Factor character variables because they all are categorical
+train_clean <- train_clean |> 
+  mutate(across(where(is.character), as.factor))
+
+# Bin the three credit score variables due to the NA count
+train_clean <- train_clean |>
+  mutate(EXT_SOURCE_1 = case_when(
+    is.na(EXT_SOURCE_1) ~ "Missing",
+    EXT_SOURCE_1 < 0.25 ~ "Low",
+    EXT_SOURCE_1 < 0.50 ~ "Medium",
+    EXT_SOURCE_1 < 0.75 ~ "High",
+    EXT_SOURCE_1 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+train_clean <- train_clean |>
+  mutate(EXT_SOURCE_2 = case_when(
+    is.na(EXT_SOURCE_2) ~ "Missing",
+    EXT_SOURCE_2 < 0.25 ~ "Low",
+    EXT_SOURCE_2 < 0.50 ~ "Medium",
+    EXT_SOURCE_2 < 0.75 ~ "High",
+    EXT_SOURCE_2 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+train_clean <- train_clean |>
+  mutate(EXT_SOURCE_3 = case_when(
+    is.na(EXT_SOURCE_3) ~ "Missing",
+    EXT_SOURCE_3 < 0.25 ~ "Low",
+    EXT_SOURCE_3 < 0.50 ~ "Medium",
+    EXT_SOURCE_3 < 0.75 ~ "High",
+    EXT_SOURCE_3 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+
+# Now we are going to replace NAs in the rest of the numeric variables with the medians
+train_clean <- train_clean %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+```
+
+## Clean Test the same way
+
+```{r}
+# Make day variables positvie
+test_clean <- test |>
+  mutate(across(c(DAYS_BIRTH, DAYS_EMPLOYED, DAYS_REGISTRATION, DAYS_ID_PUBLISH, DAYS_LAST_PHONE_CHANGE), abs))
+
+# Removal
+test_clean <- test_clean %>% 
+  select(-YEARS_BUILD_AVG, -OWN_CAR_AGE, -COMMONAREA_AVG, -FLOORSMIN_AVG, -LIVINGAPARTMENTS_AVG, 
+         -NONLIVINGAPARTMENTS_AVG, -YEARS_BUILD_MODE, -COMMONAREA_MODE, -FLOORSMIN_MODE, -LIVINGAPARTMENTS_MODE, -NONLIVINGAPARTMENTS_MODE, -YEARS_BUILD_MEDI, -COMMONAREA_MEDI, -FLOORSMIN_MEDI, -NONLIVINGAPARTMENTS_MEDI, -LIVINGAPARTMENTS_MEDI, -FLAG_MOBIL, -FLAG_DOCUMENT_2, -FLAG_DOCUMENT_4, -FLAG_DOCUMENT_7, -FLAG_DOCUMENT_10, -FLAG_DOCUMENT_12, -FLAG_DOCUMENT_17, -FLAG_DOCUMENT_21)
+
+# Factoring
+test_clean <- test_clean |> 
+  mutate(across(where(is.character), as.factor))
+
+# Bin the three credit score variables due to the NA count
+test_clean <- test_clean |>
+  mutate(EXT_SOURCE_1 = case_when(
+    is.na(EXT_SOURCE_1) ~ "Missing",
+    EXT_SOURCE_1 < 0.25 ~ "Low",
+    EXT_SOURCE_1 < 0.50 ~ "Medium",
+    EXT_SOURCE_1 < 0.75 ~ "High",
+    EXT_SOURCE_1 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+test_clean <- test_clean |>
+  mutate(EXT_SOURCE_2 = case_when(
+    is.na(EXT_SOURCE_2) ~ "Missing",
+    EXT_SOURCE_2 < 0.25 ~ "Low",
+    EXT_SOURCE_2 < 0.50 ~ "Medium",
+    EXT_SOURCE_2 < 0.75 ~ "High",
+    EXT_SOURCE_2 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+test_clean <- test_clean |>
+  mutate(EXT_SOURCE_3 = case_when(
+    is.na(EXT_SOURCE_3) ~ "Missing",
+    EXT_SOURCE_3 < 0.25 ~ "Low",
+    EXT_SOURCE_3 < 0.50 ~ "Medium",
+    EXT_SOURCE_3 < 0.75 ~ "High",
+    EXT_SOURCE_3 < 1.0 ~ "Very High" 
+    )  |> factor(levels = c("Missing", "Low", "Medium", "High", "Very High")))
+
+# Now we are going to replace NAs in the rest of the numeric variables with the medians
+test_clean <- test_clean %>%
+  mutate(across(where(is.numeric), ~ ifelse(is.na(.), median(., na.rm = TRUE), .)))
+```
+
+## Majority class
+
+```{r}
+table(train_clean$TARGET) # Class distribution
+prop.table(table(train_clean$TARGET)) # proportion of each
+```
+The majority class is no default at 92%. 
+
+## Cross Validation
+
+```{r cross validation}
+# Randomly sample 70% of the rows
+set.seed(123)
+index <- sample(x = 1:nrow(train_clean), size = nrow(train_clean)*.7, replace = F)
+
+head(index) # These are row numbers
+
+# Subset train using the index to create train_fold
+train_fold <- train_clean[index, ]
+
+# Subset the remaining row to create validation fold.
+validation_fold <- train_clean[-index, ]
+```
+
+# Modeling
+
+```{r}
+# Base model
+basemodel <- glm(TARGET ~AMT_CREDIT + AMT_ANNUITY + AMT_GOODS_PRICE + FLAG_OWN_CAR + CODE_GENDER + DAYS_EMPLOYED + DAYS_BIRTH + NAME_FAMILY_STATUS + OCCUPATION_TYPE + ORGANIZATION_TYPE + EXT_SOURCE_1 + EXT_SOURCE_2 + EXT_SOURCE_3, 
+                 data = train_clean, family = binomial)
+```
+
+```{r}
+# Get probabilities for the validation fold
+predictions <- predict(basemodel, newdata = validation_fold, type = "response")
+
+# Convert probabilities to binary class labels (threshold = 0.5)
+predicted_class <- ifelse(predictions > 0.5, 1, 0)
+
+log_loss <- function(actual, predicted) {
+  -mean(actual * log(predicted) + (1 - actual) * log(1 - predicted))
+}
+
+# Compute log loss
+log_loss(validation_fold$TARGET, predictions)
+
+
+roc_curve <- roc(validation_fold$TARGET, predictions)
+auc(roc_curve)
+```
+
+AUC of 0.737. This is a good score for our base model. We will use this score to compare with our other models to see if we get improvement. 
+
+```{r}
+# Get probabilities for the validation fold
+test_predictions <- predict(basemodel, newdata = test_clean, type = "response")
+
+head(test_predictions)
+
+#Create submission
+modeling_sub <- data.frame(
+    SK_ID_CURR = test$SK_ID_CURR,
+    TARGET = test_predictions
+)
+
+#Save submission file
+write.csv(modeling_sub, "base_home_credit_submission.csv", row.names=FALSE)
+```
+
+Kaggle Score: 0.70933
+Private Score: 0.70202
+We will also submit all models to kaggle to help use see performance increases to know which model is best.
+
+```{r}
+# logistic model with predictors that have high significance and what typical banks might use
+model1 <- glm(TARGET ~AMT_CREDIT + AMT_ANNUITY + AMT_GOODS_PRICE + FLAG_OWN_CAR + CODE_GENDER + DAYS_ID_PUBLISH + FLAG_WORK_PHONE + DAYS_EMPLOYED + NAME_FAMILY_STATUS + OCCUPATION_TYPE + REGION_RATING_CLIENT_W_CITY + EXT_SOURCE_1 + EXT_SOURCE_2 + EXT_SOURCE_3 + FLAG_DOCUMENT_3 + DEF_60_CNT_SOCIAL_CIRCLE + ORGANIZATION_TYPE + REG_REGION_NOT_LIVE_REGION + BASEMENTAREA_AVG + APARTMENTS_AVG, 
+                 data = train_clean, family = binomial)
+```
+
+```{r}
+# Get probabilities for the validation fold
+predictions <- predict(model1, newdata = validation_fold, type = "response")
+
+# Convert probabilities to binary class labels (threshold = 0.5)
+predicted_class <- ifelse(predictions > 0.5, 1, 0)
+
+log_loss <- function(actual, predicted) {
+  -mean(actual * log(predicted) + (1 - actual) * log(1 - predicted))
+}
+
+# Compute log loss
+log_loss(validation_fold$TARGET, predictions)
+
+
+roc_curve <- roc(validation_fold$TARGET, predictions)
+auc(roc_curve)
+```
+
+AUC of 0.742. This score is very good for one of our starting models.
+
+```{r}
+# Get probabilities for the validation fold
+test_predictions <- predict(model1, newdata = test_clean, type = "response")
+
+head(test_predictions)
+
+#Create submission
+modeling_sub <- data.frame(
+    SK_ID_CURR = test_clean$SK_ID_CURR,
+    TARGET = test_predictions
+)
+
+#Save submission file
+write.csv(modeling_sub, "model1_group_home_credit_submission.csv", row.names=FALSE)
+```
+
+Kaggle Score: 0.72782
+Private score: 0.72548
+We have improvement with our first model compared to our base. 
+
+# Results
+
+Our base model got an AUC of 0.73, which is a good starting score. However, in Kaggle our score dropped to 0.70, which also is not bad. We will use these score to compare our future models so that we can know if we are making improvements. With our first model, we got an AUC of 0.74. This is better than our base so we can see that we are on the right path. The Kaggle score was 0.72 which also show improvements. We found that the External source score have very high significant and will keep these in future models. These two models are logistic regression models and I would want to explore using random forest and other models to see if it can help our results.
